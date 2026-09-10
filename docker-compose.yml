@@ -1,0 +1,25 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      AUTOCHECK_DATABASE_URL: sqlite:////app/data/autocheck.db
+      AUTOCHECK_FEED_DIR: /app/data/feeds
+      AUTOCHECK_INGEST_INTERVAL_SECONDS: 60
+    volumes:
+      # Named volume for the DB; bind-mount the sample feeds so the demo has
+      # data to ingest on first boot.
+      - autocheck-data:/app/data
+      - ./data/feeds:/app/data/feeds:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  autocheck-data:
