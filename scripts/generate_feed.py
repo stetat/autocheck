@@ -125,6 +125,25 @@ TRANSMISSIONS_BY_BRAND: dict[str, list[str]] = {
 }
 DEFAULT_TRANSMISSIONS = ["АКПП", "МКПП", "Вариатор"]
 
+# Approximate price of a NEW car of each brand, in tenge. Prices are derived by
+# depreciating this, so a fresh X5 and a fresh Granta cannot end up equal.
+BRAND_BASE_PRICE_KZT: dict[str, int] = {
+    "Lada": 7_500_000,
+    "Chevrolet": 9_000_000,
+    "Renault": 11_000_000,
+    "Kia": 13_000_000,
+    "Hyundai": 13_500_000,
+    "Nissan": 15_000_000,
+    "Volkswagen": 17_000_000,
+    "Toyota": 19_000_000,
+    "BMW": 34_000_000,
+    "Mercedes-Benz": 38_000_000,
+}
+
+# Yearly value retained. Cars lose most value early, then flatten out.
+ANNUAL_RETENTION = 0.87
+RESIDUAL_FLOOR = 0.10  # even a very old car keeps roughly this share of value
+
 DEALERS = [
     ("Автосалон Астана Моторс", "Астана"),
     ("Allur Auto", "Алматы"),
@@ -187,6 +206,35 @@ def fmt_decimal(value: float) -> str:
     return f"{value:.1f}".replace(".", ",")
 
 
+def price_for(brand: str, age: int, mileage: int, rng: random.Random) -> int:
+    """Depreciate a brand's new price by age, mileage and a little noise.
+
+    Multiplicative rather than additive: an earlier version sampled a Gaussian
+    whose fixed 4M spread swamped the age-shrunken mean, so 38% of the fleet
+    landed on the clamp floor at exactly 1 800 000 and a 2005 Polo could outprice
+    a 2017 X5.
+    """
+    base = BRAND_BASE_PRICE_KZT.get(brand, 12_000_000)
+
+    retention = max(RESIDUAL_FLOOR, ANNUAL_RETENTION ** age)
+
+    # Mileage beyond the ~18k/year norm costs extra value, capped at -25%.
+    expected_km = max(1, age * 18_000)
+    excess = max(0.0, (mileage - expected_km) / expected_km)
+    mileage_penalty = max(0.75, 1.0 - 0.25 * min(1.0, excess))
+
+    noise = rng.lognormvariate(0.0, 0.11)
+
+    price = base * retention * mileage_penalty * noise
+
+    # Jittered floor: cheap old cars really do bunch near the bottom of the
+    # market, but a single constant floor shows up as one repeated price.
+    floor = 1_000_000 + rng.randrange(0, 9) * 50_000
+
+    # Dealers advertise round numbers.
+    return max(floor, int(round(price / 50_000) * 50_000))
+
+
 def build_row(rng: random.Random, exported_at: datetime, vin: str | None = None) -> dict[str, str]:
     brand = rng.choice(list(MODELS))
     model, body_type, engine_volumes = rng.choice(MODELS[brand])
@@ -195,7 +243,7 @@ def build_row(rng: random.Random, exported_at: datetime, vin: str | None = None)
 
     # Mileage correlates with age (~18k km/year) plus noise.
     mileage = max(0, int(rng.gauss(age * 18_000, age * 4_000)))
-    price = max(1_800_000, int(rng.gauss(28_000_000 / age, 4_000_000)))
+    price = price_for(brand, age, mileage, rng)
 
     # Older cars accumulate more defects.
     n_defects = min(len(DEFECTS), max(0, int(rng.gauss(age / 4, 1))))
@@ -271,7 +319,9 @@ def age_row(prev: dict[str, str], rng: random.Random, exported_at: datetime) -> 
     if prev_price is not None:
         # Usually a markdown, occasionally a small correction upward.
         factor = rng.uniform(0.94, 0.995) if rng.random() < 0.8 else rng.uniform(1.0, 1.03)
-        row["Цена"] = fmt_int(max(1_500_000, int(prev_price * factor)), rng)
+        row["Цена"] = fmt_int(
+            max(1_200_000, int(round(prev_price * factor / 50_000) * 50_000)), rng
+        )
 
     # A fresh inspection sometimes finds one more defect.
     if rng.random() < 0.25:
