@@ -67,11 +67,21 @@ def merge_runs(runs: list[IngestRun], trigger: str) -> IngestRunOut:
 def force_ingest(
     session: SessionDep,
     file: Annotated[UploadFile | None, File()] = None,
+    force: Annotated[bool, Query(description="Reprocess feeds even if unchanged")] = False,
 ) -> IngestRunOut:
     """Trigger 2 of 2: forced. Ingests an uploaded file if one is supplied,
-    otherwise sweeps the watched feed directory."""
+    otherwise sweeps the watched feed directory.
+
+    The sweep skips files it has already ingested, so calling this repeatedly is
+    cheap. Pass force=true to reprocess everything regardless.
+    """
     if file is None:
-        return merge_runs(ingest_directory(session, settings.feed_dir, trigger="webhook"), "webhook")
+        return merge_runs(
+            ingest_directory(
+                session, settings.feed_dir, trigger="webhook", skip_unchanged=not force
+            ),
+            "webhook",
+        )
 
     name = file.filename or "upload.csv"
     if not name.lower().endswith(".csv"):

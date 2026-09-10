@@ -79,6 +79,8 @@ def ingest_bytes(
     *,
     trigger: str,
     source_file: str | None = None,
+    source_mtime: float | None = None,
+    source_size: int | None = None,
 ) -> IngestRun:
     """Parse `data` and upsert it. Returns the persisted audit row."""
     started = time.perf_counter()
@@ -95,6 +97,8 @@ def ingest_bytes(
     run = IngestRun(
         trigger=trigger,
         source_file=source_file,
+        source_mtime=source_mtime,
+        source_size=source_size,
         rows_total=len(parsed.records) + len(parsed.errors),
         created=len(records) - updated,
         updated=updated,
@@ -113,18 +117,63 @@ def ingest_bytes(
 
 
 def ingest_file(session: Session, path: Path, *, trigger: str) -> IngestRun:
-    return ingest_bytes(session, path.read_bytes(), trigger=trigger, source_file=path.name)
+    stat = path.stat()
+    return ingest_bytes(
+        session,
+        path.read_bytes(),
+        trigger=trigger,
+        source_file=path.name,
+        source_mtime=stat.st_mtime,
+        source_size=stat.st_size,
+    )
 
 
-def ingest_directory(session: Session, directory: Path, *, trigger: str) -> list[IngestRun]:
-    """Ingest every CSV in `directory`, oldest first.
+def processed_files(session: Session) -> set[tuple[str, float, int]]:
+    """Identities of files already ingested successfully.
 
-    Feeds are processed in filename order so that a later export always applies
-    on top of an earlier one.
+    Only successful runs count, so a transient failure does not blacklist a feed
+    forever.
+    """
+    rows = session.exec(
+        select(IngestRun.source_file, IngestRun.source_mtime, IngestRun.source_size).where(
+            IngestRun.ok == True,  # noqa: E712 -- SQLAlchemy needs the comparison, not `is`
+            IngestRun.source_file != None,  # noqa: E711
+            IngestRun.source_mtime != None,  # noqa: E711
+        )
+    ).all()
+    return {(name, mtime, size) for name, mtime, size in rows}
+
+
+def ingest_directory(
+    session: Session,
+    directory: Path,
+    *,
+    trigger: str,
+    skip_unchanged: bool = True,
+) -> list[IngestRun]:
+    """Ingest the CSVs in `directory`, oldest first, skipping unchanged files.
+
+    Ordered by mtime rather than filename: a later export must apply on top of
+    an earlier one, and filename order gets that wrong as soon as a partner
+    reaches ten files ("feed_day10" sorts before "feed_day2").
+
+    Unchanged files are skipped so a 60-second interval costs the new drops
+    rather than the whole history, and so the run log stays free of no-op rows.
+    Pass skip_unchanged=False to force a full reprocess.
     """
     if not directory.exists():
         return []
-    return [
-        ingest_file(session, path, trigger=trigger)
-        for path in sorted(directory.glob("*.csv"))
-    ]
+
+    candidates = sorted(
+        (p for p in directory.glob("*.csv") if p.is_file()),
+        key=lambda p: (p.stat().st_mtime, p.name),
+    )
+
+    if skip_unchanged:
+        done = processed_files(session)
+        candidates = [
+            p for p in candidates
+            if (p.name, p.stat().st_mtime, p.stat().st_size) not in done
+        ]
+
+    return [ingest_file(session, path, trigger=trigger) for path in candidates]

@@ -61,6 +61,26 @@ def test_scheduled_ingest_loads_feeds_from_the_watched_directory(_isolate: Path,
         assert [v.vin for v in session.exec(select(Vehicle)).all()] == [VIN]
 
 
+def test_an_idle_sweep_does_not_log_at_info_level(_isolate: Path, monkeypatch, caplog):
+    """The job runs every interval; a per-tick INFO line for "nothing to do"
+    would bury the lines that matter."""
+    import logging
+
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import SQLModel, create_engine
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr("app.scheduler.engine", engine)
+    (_isolate / "feed.csv").write_bytes(make_feed({"VIN": VIN}))
+
+    scheduled_ingest()
+    with caplog.at_level(logging.INFO, logger="app.scheduler"):
+        scheduled_ingest()
+
+    assert [r.getMessage() for r in caplog.records] == []
+
+
 def test_scheduled_ingest_survives_a_broken_feed(_isolate: Path, monkeypatch):
     """A raising job thread dies silently in APScheduler; the service must not
     stop ingesting because one file was garbage."""

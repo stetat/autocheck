@@ -35,7 +35,7 @@ def scheduled_ingest() -> None:
                 source_file, created, updated, skipped, duration_ms,
             )
         if not summaries:
-            logger.info("scheduled ingest: no feeds in %s", settings.feed_dir)
+            logger.debug("scheduled ingest: no new feeds in %s", settings.feed_dir)
     except Exception:
         # A scheduler thread that raises kills the job silently; log and survive.
         logger.exception("scheduled ingest failed")

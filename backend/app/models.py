@@ -50,6 +50,12 @@ class IngestRun(SQLModel, table=True):
     trigger: str  # "scheduled" | "webhook" | "upload"
     source_file: str | None = None
 
+    # Identity of the consumed file, so a sweep can tell "already done" from
+    # "changed since". Stored as a raw epoch float rather than a datetime to
+    # keep equality exact across the SQLite round-trip. Null for uploads.
+    source_mtime: float | None = None
+    source_size: int | None = None
+
     rows_total: int = 0
     created: int = 0
     updated: int = 0

@@ -60,8 +60,9 @@ def test_ingest_file_records_the_source_filename(session: Session, tmp_path: Pat
     assert run.created == 1
 
 
-def test_ingest_directory_applies_feeds_in_filename_order(session: Session, tmp_path: Path):
-    """A later export must win over an earlier one, so ordering is load-bearing."""
+def test_ingest_directory_applies_feeds_oldest_first(session: Session, tmp_path: Path):
+    """A later export must win over an earlier one, so ordering is load-bearing.
+    See test_incremental_sweep for the mtime-vs-filename ordering guarantee."""
     (tmp_path / "feed_day1.csv").write_bytes(make_feed({"VIN": VIN, "Пробег": "100000"}))
     (tmp_path / "feed_day2.csv").write_bytes(make_feed({"VIN": VIN, "Пробег": "180000"}))
 

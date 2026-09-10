@@ -63,15 +63,27 @@ def test_webhook_accepts_an_uploaded_file(client: TestClient):
     assert body["source_file"] == "manual.csv"
 
 
-def test_webhook_is_idempotent_across_calls(client: TestClient):
+def test_repeating_the_webhook_on_an_unchanged_directory_is_a_no_op(client: TestClient):
+    """The sweep skips files it has already ingested, so a second call costs
+    nothing and adds no run history."""
     (client.feed_dir / "feed.csv").write_bytes(make_feed({"VIN": VIN}))
 
     client.post("/api/ingest")
     second = client.post("/api/ingest").json()
 
+    assert second["rows_total"] == 0
     assert second["created"] == 0
-    assert second["updated"] == 1
     assert client.get("/api/vehicles").json()["total"] == 1
+
+
+def test_force_makes_the_webhook_reprocess_unchanged_feeds(client: TestClient):
+    (client.feed_dir / "feed.csv").write_bytes(make_feed({"VIN": VIN}))
+
+    client.post("/api/ingest")
+    forced = client.post("/api/ingest", params={"force": True}).json()
+
+    assert forced["updated"] == 1
+    assert client.get("/api/vehicles").json()["total"] == 1, "reprocessing must not duplicate"
 
 
 def test_webhook_with_no_feeds_reports_zero_rather_than_failing(client: TestClient):
@@ -173,7 +185,7 @@ def test_brands_endpoint_lists_distinct_brands(client: TestClient, session: Sess
 def test_runs_endpoint_returns_history_newest_first(client: TestClient):
     (client.feed_dir / "feed.csv").write_bytes(make_feed({"VIN": VIN}))
     client.post("/api/ingest")
-    client.post("/api/ingest")
+    client.post("/api/ingest", params={"force": True})
 
     runs = client.get("/api/runs").json()
 
