@@ -26,5 +26,11 @@ def init_db() -> None:
 
 
 def get_session() -> Generator[Session, None, None]:
-    with Session(engine) as session:
+    # expire_on_commit=False: an ingest commits once per feed file, and each
+    # commit would otherwise expire every instance already loaded in the
+    # session. Reading an expired IngestRun after the session closes raises
+    # DetachedInstanceError; reading it while open silently yields an empty
+    # model_dump. Both bit us. Run objects are read-only summaries, so keeping
+    # their loaded state after commit is both safe and what callers expect.
+    with Session(engine, expire_on_commit=False) as session:
         yield session

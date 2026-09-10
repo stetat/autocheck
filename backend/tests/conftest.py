@@ -53,5 +53,7 @@ def session() -> Iterator[Session]:
         poolclass=StaticPool,
     )
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
+    # Mirrors the production factory in app.db.get_session; without this the
+    # tests would not reproduce commit-expiry behaviour.
+    with Session(engine, expire_on_commit=False) as s:
         yield s
