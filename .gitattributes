@@ -1,0 +1,4 @@
+# 1C exports are windows-1251 with CRLF line endings. Git must not normalise
+# them or the committed fixtures stop matching what the generator produces
+# (and stop being a faithful sample of a real 1C unload).
+data/feeds/*.csv -text working-tree-encoding=windows-1251 diff=nodiff
