@@ -45,16 +45,33 @@ docker compose down -v
 # состояние сервиса и последняя загрузка
 curl localhost:8000/api/stats
 
-# принудительная загрузка (второй триггер)
-curl -X POST localhost:8000/api/ingest
-
 # дублей нет: количество машин равно количеству уникальных VIN
 curl "localhost:8000/api/vehicles?limit=500" \
   | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x['vin'] for x in d['items']]; print(len(v), len(set(v)))"
 ```
 
-Чтобы увидеть, как срабатывает загрузка по расписанию, положите новый CSV
-в `data/feeds` — ближайший тик подхватит только его.
+**Принудительная загрузка (второй триггер):**
+
+```bash
+curl -X POST localhost:8000/api/ingest
+```
+
+Сразу после старта этот вызов вернёт нули — и это правильно: файлы из каталога
+уже загружены при старте, а обход пропускает необработанное. Чтобы увидеть работу
+на тех же файлах, добавьте `?force=true`:
+
+```bash
+curl -X POST "localhost:8000/api/ingest?force=true"   # переобрабатывает всё
+```
+
+**Загрузка по расписанию (первый триггер).** Положите новый CSV в `data/feeds` —
+ближайший тик (по умолчанию 60 секунд) подхватит только его:
+
+```bash
+cp data/feeds/feed_day1.csv data/feeds/feed_day3.csv
+docker compose logs -f backend | grep "scheduled ingest"
+# scheduled ingest feed_day3.csv: created=5 updated=101 skipped=14 in 38ms
+```
 
 ## Локальная разработка (без Docker)
 
