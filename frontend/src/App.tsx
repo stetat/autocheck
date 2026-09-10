@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchBrands,
   fetchStats,
@@ -12,6 +12,13 @@ import {
 } from "./api";
 import { RunPanel } from "./components/RunPanel";
 import { VehicleTable } from "./components/VehicleTable";
+import {
+  LANGS,
+  readStoredLang,
+  storeLang,
+  translator,
+  type Lang,
+} from "./i18n";
 
 const PAGE_SIZE = 25;
 
@@ -22,6 +29,11 @@ const POLL_MS = 10_000;
 type Toast = { text: string; kind: "ok" | "error" } | null;
 
 export default function App() {
+  // Lazy initialiser: reading localStorage on every render would be wasteful,
+  // and the read can throw when site data is blocked.
+  const [lang, setLang] = useState<Lang>(readStoredLang);
+  const t = useMemo(() => translator(lang), [lang]);
+
   const [search, setSearch] = useState("");
   const [brand, setBrand] = useState("");
   const [sort, setSort] = useState<SortField>("last_seen_at");
@@ -61,7 +73,7 @@ export default function App() {
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : "Неизвестная ошибка");
+        setError(cause instanceof Error ? cause.message : "unknown");
         setVehicles([]);
         setTotal(0);
       })
@@ -99,6 +111,14 @@ export default function App() {
     return () => controller.abort();
   }, [reloadKey]);
 
+  // Keep the document language in step so screen readers and hyphenation
+  // follow the chosen language.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.title = t("docTitle");
+    storeLang(lang);
+  }, [lang, t]);
+
   // --- toast auto-dismiss ---------------------------------------------------
   useEffect(() => {
     if (!toast) return;
@@ -113,20 +133,24 @@ export default function App() {
         const run = await triggerIngest(file);
         setToast({
           kind: "ok",
-          text: `Готово: добавлено ${run.created}, обновлено ${run.updated}, отклонено ${run.skipped}`,
+          text: t("ingestDone", {
+            created: run.created,
+            updated: run.updated,
+            skipped: run.skipped,
+          }),
         });
         setOffset(0);
         reload();
       } catch (cause) {
         setToast({
           kind: "error",
-          text: cause instanceof Error ? cause.message : "Загрузка не удалась",
+          text: cause instanceof Error ? cause.message : t("ingestFailed"),
         });
       } finally {
         setBusy(false);
       }
     },
-    [reload],
+    [reload, t],
   );
 
   const handleSort = useCallback((field: SortField) => {
@@ -149,28 +173,49 @@ export default function App() {
     <div className="shell">
       <header className="masthead">
         <div>
-          <p className="eyebrow">Autocheck.kz · интеграция с 1С автосалонов</p>
-          <h1 className="masthead__title">Загруженные автомобили</h1>
+          <p className="eyebrow">{t("eyebrow")}</p>
+          <h1 className="masthead__title">{t("title")}</h1>
         </div>
-        <p className="masthead__meta">
-          <span className={lastRunAt ? "pulse" : "pulse pulse--stale"} aria-hidden="true" />
-          {lastRunAt ? `обновлено ${formatDateTime(lastRunAt)}` : "нет данных"}
-        </p>
+
+        <div className="masthead__side">
+          <div className="langswitch" role="group" aria-label={t("languageLabel")}>
+            {LANGS.map((entry) => (
+              <button
+                key={entry.code}
+                type="button"
+                className={entry.code === lang ? "langswitch__btn is-active" : "langswitch__btn"}
+                aria-pressed={entry.code === lang}
+                lang={entry.code}
+                onClick={() => setLang(entry.code)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <p className="masthead__meta">
+            <span className={lastRunAt ? "pulse" : "pulse pulse--stale"} aria-hidden="true" />
+            {lastRunAt
+              ? t("updatedAt", { when: formatDateTime(lastRunAt) })
+              : t("noData")}
+          </p>
+        </div>
       </header>
 
       <RunPanel
         run={stats?.last_run ?? null}
         vehicles={stats?.vehicles ?? 0}
         dealers={stats?.dealers ?? 0}
+        t={t}
+        lang={lang}
       />
 
       <div className="controls">
         <label className="field field--search">
           <span className="field__icon" aria-hidden="true">⌕</span>
-          <span className="visually-hidden">Поиск по VIN, марке или модели</span>
+          <span className="visually-hidden">{t("searchLabel")}</span>
           <input
             type="search"
-            placeholder="VIN, марка или модель"
+            placeholder={t("searchPlaceholder")}
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -180,7 +225,7 @@ export default function App() {
         </label>
 
         <label className="field">
-          <span className="visually-hidden">Марка</span>
+          <span className="visually-hidden">{t("brandLabel")}</span>
           <select
             value={brand}
             onChange={(event) => {
@@ -188,7 +233,7 @@ export default function App() {
               setOffset(0);
             }}
           >
-            <option value="">Все марки</option>
+            <option value="">{t("allBrands")}</option>
             {brands.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -198,7 +243,7 @@ export default function App() {
         </label>
 
         <button className="btn" onClick={() => void runIngest()} disabled={busy}>
-          {busy ? "Загружаем…" : "Загрузить сейчас"}
+          {busy ? t("ingesting") : t("ingestNow")}
         </button>
 
         <button
@@ -206,7 +251,7 @@ export default function App() {
           onClick={() => fileInput.current?.click()}
           disabled={busy}
         >
-          Загрузить файл
+          {t("uploadFile")}
         </button>
         <input
           ref={fileInput}
@@ -224,16 +269,23 @@ export default function App() {
       <VehicleTable
         vehicles={vehicles}
         loading={loading}
-        error={error}
+        error={error === "unknown" ? t("unknownError") : error}
         sort={sort}
         order={order}
         onSort={handleSort}
+        t={t}
       />
 
       <div className="pager">
         <p className="pager__count">
-          {total === 0 ? "0 записей" : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} из ${total}`}
-          {pages > 1 ? ` · страница ${page} из ${pages}` : ""}
+          {total === 0
+            ? t("countEmpty")
+            : t("countRange", {
+                from: offset + 1,
+                to: Math.min(offset + PAGE_SIZE, total),
+                total,
+              })}
+          {pages > 1 ? t("pageOf", { page, pages }) : ""}
         </p>
         <div className="pager__buttons">
           <button
@@ -241,14 +293,14 @@ export default function App() {
             onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
             disabled={offset === 0}
           >
-            Назад
+            {t("prev")}
           </button>
           <button
             className="btn btn--ghost"
             onClick={() => setOffset((value) => value + PAGE_SIZE)}
             disabled={offset + PAGE_SIZE >= total}
           >
-            Вперёд
+            {t("next")}
           </button>
         </div>
       </div>

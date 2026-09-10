@@ -71,8 +71,17 @@ class VehicleRecord(BaseModel):
 
 
 class RowError(BaseModel):
+    """A rejected row.
+
+    `code` and `params` are the machine-readable form, so the UI can render the
+    reason in whichever language the reader has chosen. `reason` is the Russian
+    rendering, kept for logs and for any consumer that just wants a string.
+    """
+
     line: int
     vin: str | None = None
+    code: str
+    params: dict[str, str] = {}
     reason: str
 
 
@@ -83,6 +92,43 @@ class ParseResult(BaseModel):
 
 class RowRejected(Exception):
     """Raised per row and caught by the loop; never escapes parse_feed."""
+
+    def __init__(self, code: str, **params: object) -> None:
+        self.code = code
+        self.params = {key: str(value) for key, value in params.items()}
+        super().__init__(render_reason(code, self.params))
+
+
+# Russian renderings of each rejection code. The Kazakh ones live in the
+# frontend dictionary, keyed by the same codes.
+REASON_TEMPLATES: dict[str, str] = {
+    "vin_empty": "поле «VIN» пустое",
+    "vin_length": "VIN должен быть 17 символов, получено {actual}: {value}",
+    "vin_charset": "VIN содержит недопустимые символы: {value}",
+    "field_empty": "обязательное поле «{field}» пустое",
+    "field_not_number": "поле «{field}» не число: {value}",
+    "year_out_of_range": "год выпуска вне допустимого диапазона: {year}",
+    "file_empty": "файл пуст",
+    "missing_columns": "в файле нет обязательных колонок: {columns}",
+    "unhandled": "необработанная ошибка: {error}",
+}
+
+
+def render_reason(code: str, params: dict[str, str]) -> str:
+    template = REASON_TEMPLATES.get(code)
+    if template is None:
+        return code
+    try:
+        return template.format(**params)
+    except KeyError:
+        return template
+
+
+def row_error(line: int, vin: str | None, code: str, **params: object) -> RowError:
+    rendered = {key: str(value) for key, value in params.items()}
+    return RowError(
+        line=line, vin=vin, code=code, params=rendered, reason=render_reason(code, rendered)
+    )
 
 
 def decode(data: bytes) -> str:
@@ -112,19 +158,19 @@ def clean(value: str | None) -> str | None:
 def required_text(row: dict[str, str], column: str) -> str:
     value = clean(row.get(column))
     if value is None:
-        raise RowRejected(f"обязательное поле «{column}» пустое")
+        raise RowRejected("field_empty", field=column)
     return value
 
 
 def parse_int(row: dict[str, str], column: str) -> int:
     raw = clean(row.get(column))
     if raw is None:
-        raise RowRejected(f"обязательное поле «{column}» пустое")
+        raise RowRejected("field_empty", field=column)
     cleaned = raw.translate(NUMERIC_NOISE)
     # A comma decimal on an integer column ("120 500,00") is still an integer.
     cleaned = cleaned.split(",")[0].split(".")[0]
     if not cleaned.lstrip("-").isdigit():
-        raise RowRejected(f"поле «{column}» не число: {raw!r}")
+        raise RowRejected("field_not_number", field=column, value=repr(raw))
     return int(cleaned)
 
 
@@ -153,12 +199,12 @@ def parse_optional_datetime(row: dict[str, str], column: str) -> datetime | None
 def parse_vin(row: dict[str, str]) -> str:
     raw = clean(row.get("VIN"))
     if raw is None:
-        raise RowRejected("поле «VIN» пустое")
+        raise RowRejected("vin_empty")
     vin = raw.upper()
     if len(vin) != VIN_LENGTH:
-        raise RowRejected(f"VIN должен быть {VIN_LENGTH} символов, получено {len(vin)}: {vin!r}")
+        raise RowRejected("vin_length", expected=VIN_LENGTH, actual=len(vin), value=repr(vin))
     if not set(vin) <= VIN_ALPHABET:
-        raise RowRejected(f"VIN содержит недопустимые символы: {vin!r}")
+        raise RowRejected("vin_charset", value=repr(vin))
     return vin
 
 
@@ -166,7 +212,7 @@ def parse_year(row: dict[str, str]) -> int:
     year = parse_int(row, "ГодВыпуска")
     current = datetime.now().year
     if not 1900 <= year <= current + 1:
-        raise RowRejected(f"год выпуска вне допустимого диапазона: {year}")
+        raise RowRejected("year_out_of_range", year=year)
     return year
 
 
@@ -194,13 +240,13 @@ def parse_feed(data: bytes) -> ParseResult:
     reader = csv.DictReader(io.StringIO(decode(data), newline=""), delimiter=DELIMITER)
 
     if reader.fieldnames is None:
-        return ParseResult(errors=[RowError(line=0, reason="файл пуст")])
+        return ParseResult(errors=[row_error(0, None, "file_empty")])
 
     present = {(name or "").strip().lstrip("﻿") for name in reader.fieldnames}
     missing = REQUIRED_COLUMNS - present
     if missing:
         return ParseResult(
-            errors=[RowError(line=1, reason=f"в файле нет обязательных колонок: {', '.join(sorted(missing))}")]
+            errors=[row_error(1, None, "missing_columns", columns=", ".join(sorted(missing)))]
         )
 
     result = ParseResult()
@@ -209,8 +255,8 @@ def parse_feed(data: bytes) -> ParseResult:
         try:
             result.records.append(build_record(row))
         except RowRejected as exc:
-            result.errors.append(RowError(line=line, vin=clean(row.get("VIN")), reason=str(exc)))
+            result.errors.append(row_error(line, clean(row.get("VIN")), exc.code, **exc.params))
         except Exception as exc:  # a row must never take down the file
-            result.errors.append(RowError(line=line, vin=clean(row.get("VIN")), reason=f"необработанная ошибка: {exc}"))
+            result.errors.append(row_error(line, clean(row.get("VIN")), "unhandled", error=exc))
 
     return result

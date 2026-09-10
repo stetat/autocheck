@@ -1,22 +1,22 @@
 import { memo } from "react";
 import { formatNumber, type SortField, type SortOrder, type Vehicle } from "../api";
+import type { Key, Translate } from "../i18n";
 
 interface Column {
   key: keyof Vehicle | "spec";
-  label: string;
+  label: Key;
   sortAs?: SortField;
-  numeric?: boolean;
 }
 
 const COLUMNS: Column[] = [
-  { key: "vin", label: "VIN", sortAs: "vin" },
-  { key: "brand", label: "Марка и модель", sortAs: "brand" },
-  { key: "year", label: "Год", sortAs: "year", numeric: true },
-  { key: "mileage_km", label: "Пробег, км", sortAs: "mileage_km", numeric: true },
-  { key: "price_kzt", label: "Цена, ₸", sortAs: "price_kzt", numeric: true },
-  { key: "spec", label: "Характеристики" },
-  { key: "defects", label: "Дефекты" },
-  { key: "dealer_name", label: "Салон" },
+  { key: "vin", label: "colVin", sortAs: "vin" },
+  { key: "brand", label: "colModel", sortAs: "brand" },
+  { key: "year", label: "colYear", sortAs: "year" },
+  { key: "mileage_km", label: "colMileage", sortAs: "mileage_km" },
+  { key: "price_kzt", label: "colPrice", sortAs: "price_kzt" },
+  { key: "spec", label: "colSpec" },
+  { key: "defects", label: "colDefects" },
+  { key: "dealer_name", label: "colDealer" },
 ];
 
 const SKELETON_ROWS = Array.from({ length: 8 }, (_, i) => i);
@@ -28,15 +28,16 @@ interface Props {
   sort: SortField;
   order: SortOrder;
   onSort: (field: SortField) => void;
+  t: Translate;
 }
 
-function VehicleTableImpl({ vehicles, loading, error, sort, order, onSort }: Props) {
+function VehicleTableImpl({ vehicles, loading, error, sort, order, onSort, t }: Props) {
   const showSkeleton = loading && vehicles.length === 0;
 
   return (
     <div className="tablewrap">
       <table>
-        <caption className="visually-hidden">Автомобили, загруженные из выгрузок 1С</caption>
+        <caption className="visually-hidden">{t("tableCaption")}</caption>
         <colgroup>
           <col className="col-vin" />
           <col className="col-model" />
@@ -73,7 +74,7 @@ function VehicleTableImpl({ vehicles, loading, error, sort, order, onSort }: Pro
                       : undefined
                   }
                 >
-                  {column.label}
+                  {t(column.label)}
                   {active ? <span className="sortmark">{order === "asc" ? "▲" : "▼"}</span> : null}
                 </th>
               );
@@ -118,7 +119,7 @@ function VehicleTableImpl({ vehicles, loading, error, sort, order, onSort }: Pro
                     className={vehicle.defects ? "defects" : "defects defects--none"}
                     title={vehicle.defects ?? undefined}
                   >
-                    <span className="defects__text">{vehicle.defects ?? "без дефектов"}</span>
+                    <span className="defects__text">{vehicle.defects ?? t("noDefects")}</span>
                   </td>
                   <td className="dealer">
                     {vehicle.dealer_name}
@@ -131,15 +132,15 @@ function VehicleTableImpl({ vehicles, loading, error, sort, order, onSort }: Pro
 
       {!showSkeleton && error !== null ? (
         <div className="state state--error">
-          <p className="state__title">Не удалось загрузить список</p>
+          <p className="state__title">{t("loadFailed")}</p>
           <p>{error}</p>
         </div>
       ) : null}
 
       {!showSkeleton && error === null && vehicles.length === 0 ? (
         <div className="state">
-          <p className="state__title">Ничего не найдено</p>
-          <p>Измените запрос или запустите загрузку выгрузки 1С.</p>
+          <p className="state__title">{t("emptyTitle")}</p>
+          <p>{t("emptyHint")}</p>
         </div>
       ) : null}
     </div>

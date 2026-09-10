@@ -530,3 +530,38 @@ td.dealer {
   .field input { width: 100%; }
   .field--search { flex-basis: 100%; }
 }
+
+/* --- language switch ----------------------------------------------------- */
+
+.masthead__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.langswitch {
+  display: inline-flex;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.langswitch__btn {
+  border: 0;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--cond);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.langswitch__btn + .langswitch__btn { border-left: 1px solid var(--rule); }
+.langswitch__btn:hover { color: var(--stamp); background: var(--stamp-soft); }
+.langswitch__btn.is-active { background: var(--stamp); color: #fff; }
+.langswitch__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }

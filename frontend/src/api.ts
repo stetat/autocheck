@@ -34,6 +34,10 @@ export interface VehiclePage {
 export interface RowError {
   line: number;
   vin: string | null;
+  /** Machine-readable rejection code; the UI localises it. */
+  code: string;
+  params: Record<string, string>;
+  /** Russian rendering from the server, used as a fallback. */
   reason: string;
 }
 
@@ -107,14 +111,21 @@ export async function triggerIngest(file?: File): Promise<IngestRun> {
 }
 
 // --- formatting -------------------------------------------------------------
-// Hoisted to module level: constructing Intl formatters per render is costly.
+// Numbers and dates are pinned to one convention regardless of UI language.
+// Chrome's "kk" data groups thousands with commas (1,300,000) and writes dates
+// as 2026-09-10; Kazakhstan uses space grouping and DD.MM.YYYY in Kazakh just
+// as in Russian. A price also should not change shape because the reader
+// switched interface language. Hoisted to module level: building Intl objects
+// per render is costly.
 
-const KZT = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
-const DATE_TIME = new Intl.DateTimeFormat("ru-RU", {
+const DATA_LOCALE = "ru-RU";
+
+const NUMBER = new Intl.NumberFormat(DATA_LOCALE, { maximumFractionDigits: 0 });
+const DATE_TIME = new Intl.DateTimeFormat(DATA_LOCALE, {
   day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
 });
 
-export const formatNumber = (value: number) => KZT.format(value);
+export const formatNumber = (value: number) => NUMBER.format(value);
 
 /** Backend timestamps are UTC but naive (no trailing Z), so they must be
  *  marked as UTC explicitly or the browser reads them as local time. */
@@ -124,9 +135,3 @@ export function formatDateTime(iso: string | null): string {
   const date = new Date(normalised);
   return Number.isNaN(date.getTime()) ? "—" : DATE_TIME.format(date);
 }
-
-export const TRIGGER_LABELS: Record<string, string> = {
-  scheduled: "по расписанию",
-  webhook: "вручную",
-  upload: "загрузка файла",
-};
